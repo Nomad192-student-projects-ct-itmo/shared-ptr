@@ -1,18 +1,15 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <utility>
-#include <algorithm>
 
-// template <typename T>  /// it is impossible because of aliasing
-struct control_block
-{
+struct control_block {
   unsigned long strong_ref = 0;
   unsigned long weak_ref = 0;
 
   virtual ~control_block() = default;
   virtual void unlink() = 0;
-  // virtual T* get_ptr() = 0; ///it is impossible because of aliasing
 };
 
 template <typename T>
@@ -23,20 +20,12 @@ struct ptr_block : control_block {
 
   void unlink() override {
     delete p;
-    p = nullptr; //you don't have to write
   }
-
-//  ~ptr_block() {
-//    unlink();
-//  }
 };
 
 template <typename T>
 struct obj_block : control_block {
-  // T o;                                             /// bad, double delete
-  // std optional;                                    /// takes up more space than necessary
-  //alignas(alignof(T)) char o[sizeof(T)]{};          /// less readable, alignas(alignof(T)) - alignment
-  std::aligned_storage <sizeof(T), alignof(T)> o[1];     /// takes up exactly the same amount of space, more readable
+  std::aligned_storage<sizeof(T), alignof(T)> o[1];
 
   template <typename... Args>
   explicit obj_block(Args&&... args) {
@@ -62,8 +51,11 @@ class shared_ptr {
 
 public:
   shared_ptr() noexcept = default;
-  explicit shared_ptr(std::nullptr_t) noexcept : cb(new ptr_block<T>(nullptr)) {}
-  explicit shared_ptr(T* ptr) {make_cb(ptr);}
+  explicit shared_ptr(std::nullptr_t) noexcept
+      : cb(new ptr_block<T>(nullptr)) {}
+  explicit shared_ptr(T* ptr) {
+    make_cb(ptr);
+  }
 
   shared_ptr(const shared_ptr& other) noexcept : cb(other.cb), obj(other.obj) {
     if (cb)
@@ -76,17 +68,34 @@ public:
   shared_ptr<T>& operator=(const shared_ptr& other) noexcept;
   shared_ptr<T>& operator=(shared_ptr&& other) noexcept;
 
-  T* get() const noexcept         {return obj;}
-  operator bool() const noexcept  {return obj != nullptr;}
-  T& operator*() const noexcept   {return *obj;}
-  T* operator->() const noexcept  {return obj;}
+  T* get() const noexcept {
+    return obj;
+  }
+  operator bool() const noexcept {
+    return obj != nullptr;
+  }
+  T& operator*() const noexcept {
+    return *obj;
+  }
+  T* operator->() const noexcept {
+    return obj;
+  }
 
-  std::size_t use_count() const noexcept {return cb ? cb->strong_ref : 0;}
-  void reset() noexcept   {unlink();}
-  void reset(T* new_ptr)  {unlink(); make_cb(new_ptr);}
+  std::size_t use_count() const noexcept {
+    return cb ? cb->strong_ref : 0;
+  }
+  void reset() noexcept {
+    unlink();
+  }
+  void reset(T* new_ptr) {
+    unlink();
+    make_cb(new_ptr);
+  }
 
   void unlink() noexcept;
-  ~shared_ptr() noexcept  {unlink();}
+  ~shared_ptr() noexcept {
+    unlink();
+  }
 
 private:
   template <typename msT, typename... Args>
@@ -96,11 +105,8 @@ private:
 
   shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {}
 
-  //shared_ptr<T>& sp_copy(const shared_ptr& other) noexcept;
-  //shared_ptr<T>& sp_move(shared_ptr&& other) noexcept;
   void make_cb(T* ptr);
-  void swap(shared_ptr<T> &sp) noexcept
-  {
+  void swap(shared_ptr<T>& sp) noexcept {
     std::swap(cb, sp.cb);
     std::swap(obj, sp.obj);
   }
@@ -150,12 +156,6 @@ shared_ptr<T> make_shared(Args&&... args) {
   return shared_ptr(ob, ob->get());
 }
 
-//template <typename T>
-//shared_ptr<T>::shared_ptr() noexcept {
-//  cb = nullptr;
-//  obj = nullptr;
-//}
-
 template <typename T>
 void shared_ptr<T>::make_cb(T* ptr) {
   try {
@@ -168,30 +168,8 @@ void shared_ptr<T>::make_cb(T* ptr) {
   cb->strong_ref++;
 }
 
-//template <typename T>
-//shared_ptr<T>& shared_ptr<T>::sp_copy(const shared_ptr& other) noexcept {
-//  obj = other.obj;
-//  cb = other.cb;
-//  if (cb)
-//    cb->strong_ref++;
-//
-//  return *this;
-//}
-//
-//template <typename T>
-//shared_ptr<T>& shared_ptr<T>::sp_move(shared_ptr&& other) noexcept {
-//  obj = other.obj;
-//  other.obj = nullptr;
-//
-//  cb = other.cb;
-//  other.cb = nullptr;
-//
-//  return *this;
-//}
-
 template <typename T>
-void shared_ptr<T>::unlink() noexcept
-{
+void shared_ptr<T>::unlink() noexcept {
   if (cb) {
     cb->strong_ref--;
     if (cb->strong_ref == 0)
