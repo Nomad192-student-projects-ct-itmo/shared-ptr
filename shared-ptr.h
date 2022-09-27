@@ -3,6 +3,17 @@
 #include <algorithm>
 #include <cstddef>
 #include <utility>
+#include <memory>
+
+//----------------------------------------------------------------------------//
+
+struct control_block;
+template<typename T> struct ptr_block;
+template<typename T> struct obj_block;
+template<typename T> class shared_ptr;
+template<typename T> class weak_ptr;
+
+//----------------------------------------------------------------------------//
 
 struct control_block {
   unsigned long strong_ref = 0;
@@ -41,20 +52,30 @@ struct obj_block : control_block {
   }
 };
 
-template <typename T>
-class weak_ptr;
+//----------------------------------------------------------------------------//
 
 template <typename T>
 class shared_ptr {
   control_block* cb = nullptr;
   T* obj = nullptr;
 
+  shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {}
+
+  template <typename mT, typename Deleter = std::default_delete<T>>
+  void make_cb(mT* ptr, Deleter d = Deleter{});
+
 public:
   shared_ptr() noexcept = default;
   explicit shared_ptr(std::nullptr_t) noexcept
       : cb(new ptr_block<T>(nullptr)) {}
-  explicit shared_ptr(T* ptr) {
-    make_cb(ptr);
+//
+//  explicit shared_ptr(T* ptr) {
+//    make_cb(ptr, std::default_delete<T>());
+//  }
+
+  template <typename cT, typename Deleter = std::default_delete<cT>>
+  explicit shared_ptr(cT* ptr, Deleter d = Deleter{}) {
+    make_cb<cT, Deleter>(ptr, d);
   }
 
   shared_ptr(const shared_ptr& other) noexcept : cb(other.cb), obj(other.obj) {
@@ -89,7 +110,13 @@ public:
   }
   void reset(T* new_ptr) {
     unlink();
-    make_cb(new_ptr);
+    make_cb(new_ptr, std::default_delete<T>());
+  }
+
+  template <typename Deleter = std::default_delete<T>()>
+  void reset(T* new_ptr, Deleter d) {
+    unlink();
+    make_cb(new_ptr, d);
   }
 
   void unlink() noexcept;
@@ -103,14 +130,13 @@ private:
 
   friend class weak_ptr<T>;
 
-  shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {}
-
-  void make_cb(T* ptr);
   void swap(shared_ptr<T>& sp) noexcept {
     std::swap(cb, sp.cb);
     std::swap(obj, sp.obj);
   }
 };
+
+//----------------------------------------------------------------------------//
 
 template <typename T>
 class weak_ptr {
@@ -149,17 +175,20 @@ private:
   T* obj = nullptr;
 };
 
+//----------------------------------------------------------------------------//
+
 template <typename T, typename... Args>
 shared_ptr<T> make_shared(Args&&... args) {
   auto* ob = new obj_block<T>(std::forward<Args>(args)...);
   ob->strong_ref++;
-  return shared_ptr(ob, ob->get());
+  return shared_ptr(reinterpret_cast<control_block *>(ob), ob->get());
 }
 
 template <typename T>
-void shared_ptr<T>::make_cb(T* ptr) {
+template <typename mT, typename Deleter>
+void shared_ptr<T>::make_cb(mT* ptr, Deleter d) {
   try {
-    cb = new ptr_block<T>(ptr);
+    cb = new ptr_block<mT>(ptr);
   } catch (...) {
     delete ptr;
     throw;
