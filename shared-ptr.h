@@ -2,42 +2,45 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <utility>
 #include <memory>
 
-//----------------------------------------------------------------------------//
+#include <iostream>
+
+///--------------------------------------------------------------------------///
 
 struct control_block;
-template<typename T> struct ptr_block;
+template<typename T, typename Deleter> struct ptr_block;
 template<typename T> struct obj_block;
 template<typename T> class shared_ptr;
 template<typename T> class weak_ptr;
 
-//----------------------------------------------------------------------------//
+///--------------------------------------------------------------------------///
 
 struct control_block {
   unsigned long strong_ref = 0;
   unsigned long weak_ref = 0;
 
-  virtual ~control_block() = default;
   virtual void unlink() = 0;
+  virtual ~control_block() = default;
 };
 
-template <typename T>
-struct ptr_block : control_block {
+template <typename T, typename Deleter = std::default_delete<T>>
+struct ptr_block : control_block, Deleter {
   T* p;
 
-  explicit ptr_block(T* p) : p(p) {}
+  explicit ptr_block(T* p, Deleter d = Deleter{}) : Deleter(std::move(d)), p(p) {}
 
   void unlink() override {
-    delete p;
+    Deleter::operator()(p);
   }
 };
 
 template <typename T>
 struct obj_block : control_block {
+private:
   std::aligned_storage<sizeof(T), alignof(T)> o[1];
 
+public:
   template <typename... Args>
   explicit obj_block(Args&&... args) {
     new (o) T(std::forward<Args>(args)...);
@@ -52,40 +55,68 @@ struct obj_block : control_block {
   }
 };
 
-//----------------------------------------------------------------------------//
+///--------------------------------------------------------------------------///
 
 template <typename T>
 class shared_ptr {
   control_block* cb = nullptr;
   T* obj = nullptr;
 
-  shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {}
+  template<typename otherT>
+  friend class shared_ptr;
 
-  template <typename mT, typename Deleter = std::default_delete<T>>
-  void make_cb(mT* ptr, Deleter d = Deleter{});
+  shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {  }
+
+  template <typename T_make, typename Deleter = std::default_delete<T_make>>
+  void make_cb(T_make* ptr, Deleter d = Deleter{});
+  void unlink() noexcept;
 
 public:
   shared_ptr() noexcept = default;
-  explicit shared_ptr(std::nullptr_t) noexcept
-      : cb(new ptr_block<T>(nullptr)) {}
+  explicit shared_ptr(std::nullptr_t) noexcept : cb(new ptr_block<T>(nullptr)){}
+
 //
 //  explicit shared_ptr(T* ptr) {
 //    make_cb(ptr, std::default_delete<T>());
 //  }
 
-  template <typename cT, typename Deleter = std::default_delete<cT>>
-  explicit shared_ptr(cT* ptr, Deleter d = Deleter{}) {
-    make_cb<cT, Deleter>(ptr, d);
+//  template <typename cT, typename Deleter = std::default_delete<cT>>
+//  explicit shared_ptr(cT* ptr, Deleter d = Deleter{}) {
+//    make_cb<cT, Deleter>(ptr, d);
+//  }
+
+  template <typename T_construct, typename Deleter = std::default_delete<T_construct>>
+  explicit shared_ptr(T_construct* ptr, Deleter d = Deleter{}) {
+    make_cb(ptr, std::move(d));
   }
 
-  shared_ptr(const shared_ptr& other) noexcept : cb(other.cb), obj(other.obj) {
-    if (cb)
+  template <typename T_parent>
+  shared_ptr(shared_ptr<T_parent> &parent, T *ptr) : cb(parent.cb), obj(ptr) {
+    if(cb != nullptr)
       cb->strong_ref++;
   }
-  shared_ptr(shared_ptr&& other) noexcept : cb(other.cb), obj(other.obj) {
+
+  shared_ptr(const shared_ptr<T>& other) noexcept : cb(other.cb), obj(other.obj) {
+    if (cb != nullptr)
+      cb->strong_ref++;
+  }
+  // Как можно исправить это место, чтобы не дублировался конструктор?
+  template <typename T_copy>
+  shared_ptr(const shared_ptr<T_copy>& other) noexcept : cb(other.cb), obj(other.obj) {
+    if (cb != nullptr)
+      cb->strong_ref++;
+  }
+
+  shared_ptr(shared_ptr<T>&& other) noexcept : cb(other.cb), obj(other.obj) {
     other.obj = nullptr;
     other.cb = nullptr;
   }
+  template <typename T_move>
+  shared_ptr(shared_ptr<T_move>&& other) noexcept : cb(other.cb), obj(other.obj) {
+    other.obj = nullptr;
+    other.cb = nullptr;
+  }
+
   shared_ptr<T>& operator=(const shared_ptr& other) noexcept;
   shared_ptr<T>& operator=(shared_ptr&& other) noexcept;
 
@@ -108,20 +139,25 @@ public:
   void reset() noexcept {
     unlink();
   }
-  void reset(T* new_ptr) {
+
+  template <typename T_reset, typename Deleter = std::default_delete<T_reset>>
+  void reset(T_reset* new_ptr, Deleter d = Deleter{}) {
     unlink();
-    make_cb(new_ptr, std::default_delete<T>());
+    make_cb(new_ptr, std::move(d));
   }
 
-  template <typename Deleter = std::default_delete<T>()>
-  void reset(T* new_ptr, Deleter d) {
-    unlink();
-    make_cb(new_ptr, d);
-  }
-
-  void unlink() noexcept;
   ~shared_ptr() noexcept {
     unlink();
+  }
+
+  operator T*() const noexcept
+  {
+    return obj;
+  }
+
+  bool operator==(const shared_ptr<T> &other)
+  {
+    return (cb == other.cb) && (obj == other.obj);
   }
 
 private:
@@ -136,10 +172,13 @@ private:
   }
 };
 
-//----------------------------------------------------------------------------//
+///--------------------------------------------------------------------------///
 
 template <typename T>
 class weak_ptr {
+  control_block* cb = nullptr;
+  T* obj = nullptr;
+
 public:
   weak_ptr() noexcept = default;
   weak_ptr(const shared_ptr<T>& other) noexcept : cb(other.cb), obj(other.obj) {
@@ -147,8 +186,32 @@ public:
       cb->weak_ref++;
   }
 
+  weak_ptr(const weak_ptr<T>& other) noexcept : cb(other.cb), obj(other.obj)
+  {
+    if(cb != nullptr)
+      cb->weak_ref++;
+  }
+
+  weak_ptr(weak_ptr<T>&& other) noexcept : cb(other.cb), obj(other.obj)
+  {
+    other.cb = nullptr;
+    other.obj = nullptr;
+  }
+
+  weak_ptr<T>& operator=(const weak_ptr<T>& other) noexcept {
+    weak_ptr<T> new_wp(other);
+    this->swap(new_wp);
+    return *this;
+  }
+
+  weak_ptr<T>& operator=(weak_ptr<T>&& other) noexcept {
+    weak_ptr<T> new_wp(std::move(other));
+    this->swap(new_wp);
+    return *this;
+  }
+
   weak_ptr& operator=(const shared_ptr<T>& other) noexcept {
-    this->~weak_ptr();
+    unlink();
 
     cb = other.cb;
     obj = other.obj;
@@ -159,23 +222,42 @@ public:
   }
 
   shared_ptr<T> lock() const noexcept {
-    return (cb && cb->strong_ref != 0) ? shared_ptr<T>(cb, obj)
-                                       : shared_ptr<T>();
+    if(cb != nullptr && cb->strong_ref != 0)
+    {
+      cb->strong_ref++;
+      return shared_ptr<T>(cb, obj);
+    }
+    else
+    {
+      return shared_ptr<T>();
+    }
   }
 
   ~weak_ptr() {
-    if (cb)
+    unlink();
+  }
+
+private:
+  void unlink() noexcept
+  {
+    if (cb != nullptr)
+    {
       cb->weak_ref--;
+//      if(cb->strong_ref + cb->weak_ref == 0)
+//        delete cb;
+    }
+
     cb = nullptr;
     obj = nullptr;
   }
 
-private:
-  control_block* cb = nullptr;
-  T* obj = nullptr;
+  void swap(weak_ptr<T>& wp) noexcept {
+    std::swap(cb, wp.cb);
+    std::swap(obj, wp.obj);
+  }
 };
 
-//----------------------------------------------------------------------------//
+///--------------------------------------------------------------------------///
 
 template <typename T, typename... Args>
 shared_ptr<T> make_shared(Args&&... args) {
@@ -185,12 +267,12 @@ shared_ptr<T> make_shared(Args&&... args) {
 }
 
 template <typename T>
-template <typename mT, typename Deleter>
-void shared_ptr<T>::make_cb(mT* ptr, Deleter d) {
+template <typename T_make, typename Deleter>
+void shared_ptr<T>::make_cb(T_make* ptr, Deleter d) {
   try {
-    cb = new ptr_block<mT>(ptr);
+    cb = new ptr_block<T_make, Deleter>(ptr, std::move(d));
   } catch (...) {
-    delete ptr;
+    d(ptr);
     throw;
   }
   obj = ptr;
@@ -199,12 +281,17 @@ void shared_ptr<T>::make_cb(mT* ptr, Deleter d) {
 
 template <typename T>
 void shared_ptr<T>::unlink() noexcept {
-  if (cb) {
+  if (cb != nullptr) {
     cb->strong_ref--;
     if (cb->strong_ref == 0)
+    {
       cb->unlink();
+    }
     if (cb->strong_ref + cb->weak_ref == 0)
+    {
       delete cb;
+    }
+
     cb = nullptr;
   }
   obj = nullptr;
