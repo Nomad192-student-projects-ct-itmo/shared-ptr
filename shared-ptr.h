@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <memory>
 
+#include <iostream>
+
 ///--------------------------------------------------------------------------///
 
 struct control_block;
@@ -271,7 +273,9 @@ void shared_ptr<T>::make_cb(T_make* ptr, Deleter d) {
 template <typename T>
 void shared_ptr<T>::unlink() noexcept {
   if (cb != nullptr) {
-    cb->strong_ref--;
+    if(cb->strong_ref > 0)
+      cb->strong_ref--;
+
     if (cb->strong_ref == 0) {
       cb->unlink();
     }
