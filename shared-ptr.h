@@ -4,15 +4,17 @@
 #include <cstddef>
 #include <memory>
 
-#include <iostream>
-
 ///--------------------------------------------------------------------------///
 
 struct control_block;
-template<typename T, typename Deleter> struct ptr_block;
-template<typename T> struct obj_block;
-template<typename T> class shared_ptr;
-template<typename T> class weak_ptr;
+template <typename T, typename Deleter>
+struct ptr_block;
+template <typename T>
+struct obj_block;
+template <typename T>
+class shared_ptr;
+template <typename T>
+class weak_ptr;
 
 ///--------------------------------------------------------------------------///
 
@@ -28,7 +30,8 @@ template <typename T, typename Deleter = std::default_delete<T>>
 struct ptr_block : control_block, Deleter {
   T* p;
 
-  explicit ptr_block(T* p, Deleter d = Deleter{}) : Deleter(std::move(d)), p(p) {}
+  explicit ptr_block(T* p, Deleter d = Deleter{})
+      : Deleter(std::move(d)), p(p) {}
 
   void unlink() override {
     Deleter::operator()(p);
@@ -62,10 +65,10 @@ class shared_ptr {
   control_block* cb = nullptr;
   T* obj = nullptr;
 
-  template<typename otherT>
+  template <typename otherT>
   friend class shared_ptr;
 
-  shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {  }
+  shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {}
 
   template <typename T_make, typename Deleter = std::default_delete<T_make>>
   void make_cb(T_make* ptr, Deleter d = Deleter{});
@@ -73,36 +76,30 @@ class shared_ptr {
 
 public:
   shared_ptr() noexcept = default;
-  explicit shared_ptr(std::nullptr_t) noexcept : cb(new ptr_block<T>(nullptr)){}
+  explicit shared_ptr(std::nullptr_t) noexcept
+      : cb(new ptr_block<T>(nullptr)) {}
 
-//
-//  explicit shared_ptr(T* ptr) {
-//    make_cb(ptr, std::default_delete<T>());
-//  }
-
-//  template <typename cT, typename Deleter = std::default_delete<cT>>
-//  explicit shared_ptr(cT* ptr, Deleter d = Deleter{}) {
-//    make_cb<cT, Deleter>(ptr, d);
-//  }
-
-  template <typename T_construct, typename Deleter = std::default_delete<T_construct>>
+  template <typename T_construct,
+            typename Deleter = std::default_delete<T_construct>>
   explicit shared_ptr(T_construct* ptr, Deleter d = Deleter{}) {
     make_cb(ptr, std::move(d));
   }
 
   template <typename T_parent>
-  shared_ptr(shared_ptr<T_parent> &parent, T *ptr) : cb(parent.cb), obj(ptr) {
-    if(cb != nullptr)
+  shared_ptr(shared_ptr<T_parent>& parent, T* ptr) : cb(parent.cb), obj(ptr) {
+    if (cb != nullptr)
       cb->strong_ref++;
   }
 
-  shared_ptr(const shared_ptr<T>& other) noexcept : cb(other.cb), obj(other.obj) {
+  shared_ptr(const shared_ptr<T>& other) noexcept
+      : cb(other.cb), obj(other.obj) {
     if (cb != nullptr)
       cb->strong_ref++;
   }
   // Как можно исправить это место, чтобы не дублировался конструктор?
   template <typename T_copy>
-  shared_ptr(const shared_ptr<T_copy>& other) noexcept : cb(other.cb), obj(other.obj) {
+  shared_ptr(const shared_ptr<T_copy>& other) noexcept
+      : cb(other.cb), obj(other.obj) {
     if (cb != nullptr)
       cb->strong_ref++;
   }
@@ -112,7 +109,8 @@ public:
     other.cb = nullptr;
   }
   template <typename T_move>
-  shared_ptr(shared_ptr<T_move>&& other) noexcept : cb(other.cb), obj(other.obj) {
+  shared_ptr(shared_ptr<T_move>&& other) noexcept
+      : cb(other.cb), obj(other.obj) {
     other.obj = nullptr;
     other.cb = nullptr;
   }
@@ -150,13 +148,11 @@ public:
     unlink();
   }
 
-  operator T*() const noexcept
-  {
+  operator T*() const noexcept {
     return obj;
   }
 
-  bool operator==(const shared_ptr<T> &other)
-  {
+  bool operator==(const shared_ptr<T>& other) {
     return (cb == other.cb) && (obj == other.obj);
   }
 
@@ -186,14 +182,12 @@ public:
       cb->weak_ref++;
   }
 
-  weak_ptr(const weak_ptr<T>& other) noexcept : cb(other.cb), obj(other.obj)
-  {
-    if(cb != nullptr)
+  weak_ptr(const weak_ptr<T>& other) noexcept : cb(other.cb), obj(other.obj) {
+    if (cb != nullptr)
       cb->weak_ref++;
   }
 
-  weak_ptr(weak_ptr<T>&& other) noexcept : cb(other.cb), obj(other.obj)
-  {
+  weak_ptr(weak_ptr<T>&& other) noexcept : cb(other.cb), obj(other.obj) {
     other.cb = nullptr;
     other.obj = nullptr;
   }
@@ -222,13 +216,10 @@ public:
   }
 
   shared_ptr<T> lock() const noexcept {
-    if(cb != nullptr && cb->strong_ref != 0)
-    {
+    if (cb != nullptr && cb->strong_ref != 0) {
       cb->strong_ref++;
       return shared_ptr<T>(cb, obj);
-    }
-    else
-    {
+    } else {
       return shared_ptr<T>();
     }
   }
@@ -238,13 +229,11 @@ public:
   }
 
 private:
-  void unlink() noexcept
-  {
-    if (cb != nullptr)
-    {
+  void unlink() noexcept {
+    if (cb != nullptr) {
       cb->weak_ref--;
-//      if(cb->strong_ref + cb->weak_ref == 0)
-//        delete cb;
+      if (cb->strong_ref + cb->weak_ref == 0)
+        delete cb;
     }
 
     cb = nullptr;
@@ -263,7 +252,7 @@ template <typename T, typename... Args>
 shared_ptr<T> make_shared(Args&&... args) {
   auto* ob = new obj_block<T>(std::forward<Args>(args)...);
   ob->strong_ref++;
-  return shared_ptr(reinterpret_cast<control_block *>(ob), ob->get());
+  return shared_ptr(reinterpret_cast<control_block*>(ob), ob->get());
 }
 
 template <typename T>
@@ -283,15 +272,12 @@ template <typename T>
 void shared_ptr<T>::unlink() noexcept {
   if (cb != nullptr) {
     cb->strong_ref--;
-    if (cb->strong_ref == 0)
-    {
+    if (cb->strong_ref == 0) {
       cb->unlink();
     }
-    if (cb->strong_ref + cb->weak_ref == 0)
-    {
+    if (cb->strong_ref + cb->weak_ref == 0) {
       delete cb;
     }
-
     cb = nullptr;
   }
   obj = nullptr;
