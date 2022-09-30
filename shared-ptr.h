@@ -4,21 +4,13 @@
 #include <cstddef>
 #include <memory>
 
-#include <iostream>
-
-///--------------------------------------------------------------------------///
-
-struct control_block;
-template <typename T, typename Deleter>
-struct ptr_block;
-template <typename T>
-struct obj_block;
-template <typename T>
-class shared_ptr;
-template <typename T>
-class weak_ptr;
-
-///--------------------------------------------------------------------------///
+/** Implemented classes:
+ * struct control_block;
+ * template <typename T, typename Deleter> struct ptr_block;
+ * template <typename T> struct obj_block;
+ * template <typename T> class shared_ptr;
+ * template <typename T> class weak_ptr;
+ * **/
 
 struct control_block {
   unsigned long strong_ref = 0;
@@ -61,6 +53,7 @@ public:
 };
 
 ///--------------------------------------------------------------------------///
+template <typename T> class weak_ptr;
 
 template <typename T>
 class shared_ptr {
@@ -73,8 +66,34 @@ class shared_ptr {
   shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {}
 
   template <typename T_make, typename Deleter = std::default_delete<T_make>>
-  void make_cb(T_make* ptr, Deleter d = Deleter{});
-  void unlink() noexcept;
+  void make_cb(T_make* ptr, Deleter d = Deleter{})
+  {
+    try {
+      cb = new ptr_block<T_make, Deleter>(ptr, std::move(d));
+    } catch (...) {
+      d(ptr);
+      throw;
+    }
+    obj = ptr;
+    cb->strong_ref++;
+  }
+  void unlink() noexcept
+  {
+    if (cb != nullptr) {
+      if(cb->strong_ref > 0)
+        cb->strong_ref--;
+
+      if (cb->strong_ref == 0) {
+        cb->unlink();
+      }
+      if (cb->strong_ref + cb->weak_ref == 0) {
+        delete cb;
+      }
+      cb = nullptr;
+    }
+    obj = nullptr;
+  }
+
 
 public:
   shared_ptr() noexcept = default;
@@ -110,6 +129,7 @@ public:
     other.obj = nullptr;
     other.cb = nullptr;
   }
+  // Как можно исправить это место, чтобы не дублировался конструктор?
   template <typename T_move>
   shared_ptr(shared_ptr<T_move>&& other) noexcept
       : cb(other.cb), obj(other.obj) {
@@ -117,8 +137,17 @@ public:
     other.cb = nullptr;
   }
 
-  shared_ptr<T>& operator=(const shared_ptr& other) noexcept;
-  shared_ptr<T>& operator=(shared_ptr&& other) noexcept;
+  shared_ptr<T>& operator=(const shared_ptr& other) noexcept{
+    shared_ptr<T> new_sp(other);
+    this->swap(new_sp);
+    return *this;
+  }
+  shared_ptr<T>& operator=(shared_ptr&& other) noexcept
+  {
+    shared_ptr<T> new_sp(std::move(other));
+    this->swap(new_sp);
+    return *this;
+  }
 
   T* get() const noexcept {
     return obj;
@@ -257,46 +286,46 @@ shared_ptr<T> make_shared(Args&&... args) {
   return shared_ptr(reinterpret_cast<control_block*>(ob), ob->get());
 }
 
-template <typename T>
-template <typename T_make, typename Deleter>
-void shared_ptr<T>::make_cb(T_make* ptr, Deleter d) {
-  try {
-    cb = new ptr_block<T_make, Deleter>(ptr, std::move(d));
-  } catch (...) {
-    d(ptr);
-    throw;
-  }
-  obj = ptr;
-  cb->strong_ref++;
-}
-
-template <typename T>
-void shared_ptr<T>::unlink() noexcept {
-  if (cb != nullptr) {
-    if(cb->strong_ref > 0)
-      cb->strong_ref--;
-
-    if (cb->strong_ref == 0) {
-      cb->unlink();
-    }
-    if (cb->strong_ref + cb->weak_ref == 0) {
-      delete cb;
-    }
-    cb = nullptr;
-  }
-  obj = nullptr;
-}
-
-template <typename T>
-shared_ptr<T>& shared_ptr<T>::operator=(const shared_ptr& other) noexcept {
-  shared_ptr<T> new_sp(other);
-  this->swap(new_sp);
-  return *this;
-}
-
-template <typename T>
-shared_ptr<T>& shared_ptr<T>::operator=(shared_ptr&& other) noexcept {
-  shared_ptr<T> new_sp(std::move(other));
-  this->swap(new_sp);
-  return *this;
-}
+//template <typename T>
+//template <typename T_make, typename Deleter>
+//void shared_ptr<T>::make_cb(T_make* ptr, Deleter d) {
+//  try {
+//    cb = new ptr_block<T_make, Deleter>(ptr, std::move(d));
+//  } catch (...) {
+//    d(ptr);
+//    throw;
+//  }
+//  obj = ptr;
+//  cb->strong_ref++;
+//}
+//
+//template <typename T>
+//void shared_ptr<T>::unlink() noexcept {
+//  if (cb != nullptr) {
+//    if(cb->strong_ref > 0)
+//      cb->strong_ref--;
+//
+//    if (cb->strong_ref == 0) {
+//      cb->unlink();
+//    }
+//    if (cb->strong_ref + cb->weak_ref == 0) {
+//      delete cb;
+//    }
+//    cb = nullptr;
+//  }
+//  obj = nullptr;
+//}
+//
+//template <typename T>
+//shared_ptr<T>& shared_ptr<T>::operator=(const shared_ptr& other) noexcept {
+//  shared_ptr<T> new_sp(other);
+//  this->swap(new_sp);
+//  return *this;
+//}
+//
+//template <typename T>
+//shared_ptr<T>& shared_ptr<T>::operator=(shared_ptr&& other) noexcept {
+//  shared_ptr<T> new_sp(std::move(other));
+//  this->swap(new_sp);
+//  return *this;
+//}
