@@ -96,14 +96,11 @@ public:
 
   template <typename T_construct,
             typename Deleter = std::default_delete<T_construct>>
-  explicit shared_ptr(T_construct* ptr, Deleter d = Deleter{}) {
-    try {
-      cb = new ptr_block<T_construct, Deleter>(ptr, std::move(d));
-    } catch (...) {
-      d(ptr);
-      throw;
-    }
-    obj = ptr;
+  explicit shared_ptr(T_construct* ptr, Deleter d = Deleter{}) try
+      : cb(new ptr_block<T_construct, Deleter>(ptr, std::move(d))), obj(ptr) {
+  } catch (...) {
+    d(ptr);
+    throw;
   }
 
   /// aliasing constructor
@@ -137,13 +134,11 @@ public:
   }
 
   shared_ptr<T>& operator=(const shared_ptr& other) noexcept {
-    shared_ptr<T> new_sp(other);
-    this->swap(new_sp);
+    shared_ptr<T>(other).swap(*this);
     return *this;
   }
   shared_ptr<T>& operator=(shared_ptr&& other) noexcept {
-    shared_ptr<T> new_sp(std::move(other));
-    this->swap(new_sp);
+    shared_ptr<T>(std::move(other)).swap(*this);
     return *this;
   }
 
@@ -172,8 +167,6 @@ public:
 
   template <typename T_reset, typename Deleter = std::default_delete<T_reset>>
   void reset(T_reset* new_ptr, Deleter d = Deleter{}) {
-    // unlink();
-    // make_cb(new_ptr, std::move(d));
     *this = shared_ptr(new_ptr, d);
   }
 
@@ -226,20 +219,17 @@ public:
   }
 
   weak_ptr<T>& operator=(const weak_ptr<T>& other) noexcept {
-    weak_ptr<T> new_wp(other);
-    this->swap(new_wp);
+    weak_ptr<T>(other).swap(*this);
     return *this;
   }
 
   weak_ptr<T>& operator=(weak_ptr<T>&& other) noexcept {
-    weak_ptr<T> new_wp(std::move(other));
-    this->swap(new_wp);
+    weak_ptr<T>(std::move(other)).swap(*this);
     return *this;
   }
 
   weak_ptr& operator=(const shared_ptr<T>& other) noexcept {
-    weak_ptr<T> new_wp(other);
-    this->swap(new_wp);
+    weak_ptr<T>(other).swap(*this);
     return *this;
   }
 
