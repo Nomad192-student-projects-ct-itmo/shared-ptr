@@ -13,10 +13,10 @@
  * **/
 
 struct control_block {
-  void inc(bool are_you_strong = true) {
+  void inc(bool are_you_strong = true) noexcept {
     are_you_strong ? strong_ref++ : weak_ref++;
   }
-  void dec(bool are_you_strong = true) {
+  void dec(bool are_you_strong = true) noexcept {
     are_you_strong ? strong_ref-- : weak_ref--;
 
     if (are_you_strong && strong_ref == 0) {
@@ -27,7 +27,7 @@ struct control_block {
     }
   }
 
-  uint64_t get_count(bool are_you_strong = true) {
+  uint64_t get_count(bool are_you_strong = true) const noexcept {
     return are_you_strong ? strong_ref : weak_ref;
   }
   virtual ~control_block() = default;
@@ -83,17 +83,18 @@ class shared_ptr {
   friend class weak_ptr<T>;
 
   shared_ptr(control_block* cb, T* ptr) : cb(cb), obj(ptr) {}
-  shared_ptr(const weak_ptr<T>& wp) {
-    if (wp.cb && wp.cb->get_count() > 0) {
-      wp.cb->inc();
-      shared_ptr<T>(wp.cb, wp.obj).swap(*this);
-    }
-  }
 
 public:
   shared_ptr() noexcept = default;
   explicit shared_ptr(std::nullptr_t) noexcept {}
 
+  shared_ptr(const weak_ptr<T>& wp) : cb(wp.cb), obj(wp.obj) {
+    if (cb && cb->get_count() > 0) {
+      cb->inc();
+    } else {
+      throw std::bad_weak_ptr();
+    }
+  }
   template <typename T_construct,
             typename Deleter = std::default_delete<T_construct>>
   explicit shared_ptr(T_construct* ptr, Deleter d = Deleter{}) try
@@ -177,15 +178,14 @@ public:
   operator T*() const noexcept {
     return obj;
   }
-
-private:
-  template <typename msT, typename... Args>
-  friend shared_ptr<msT> make_shared(Args&&... args);
-
   void swap(shared_ptr<T>& sp) noexcept {
     std::swap(cb, sp.cb);
     std::swap(obj, sp.obj);
   }
+
+private:
+  template <typename msT, typename... Args>
+  friend shared_ptr<msT> make_shared(Args&&... args);
 };
 
 template <class T, class U>
@@ -234,15 +234,18 @@ public:
   }
 
   shared_ptr<T> lock() const noexcept {
-    return (*this);
+    try {
+      return shared_ptr<T>(*this);
+    } catch (std::bad_weak_ptr) {
+      return shared_ptr<T>();
+    }
   }
 
-  ~weak_ptr() {
+  ~weak_ptr() noexcept {
     if (cb)
       cb->dec(false);
   }
 
-private:
   void swap(weak_ptr<T>& wp) noexcept {
     std::swap(cb, wp.cb);
     std::swap(obj, wp.obj);
@@ -254,5 +257,5 @@ private:
 template <typename T, typename... Args>
 shared_ptr<T> make_shared(Args&&... args) {
   auto* ob = new obj_block<T>(std::forward<Args>(args)...);
-  return shared_ptr<T>(reinterpret_cast<control_block*>(ob), ob->get());
+  return shared_ptr<T>(static_cast<control_block*>(ob), ob->get());
 }
