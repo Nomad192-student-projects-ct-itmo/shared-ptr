@@ -13,10 +13,11 @@
  * **/
 
 struct control_block {
-  void inc(bool are_you_strong = true) noexcept {
+  control_block* inc(bool are_you_strong = true) noexcept {
     are_you_strong ? strong_ref++ : weak_ref++;
+    return this;
   }
-  void dec(bool are_you_strong = true) noexcept {
+  control_block* dec(bool are_you_strong = true) noexcept {
     are_you_strong ? strong_ref-- : weak_ref--;
 
     if (are_you_strong && strong_ref == 0) {
@@ -25,6 +26,7 @@ struct control_block {
     if (strong_ref == 0 && weak_ref == 0) {
       delete this;
     }
+    return this;
   }
 
   uint64_t get_count(bool are_you_strong = true) const noexcept {
@@ -88,10 +90,10 @@ public:
   shared_ptr() noexcept = default;
   explicit shared_ptr(std::nullptr_t) noexcept {}
 
-  shared_ptr(const weak_ptr<T>& wp) : cb(wp.cb), obj(wp.obj) {
-    if (cb && cb->get_count() > 0) {
-      cb->inc();
-    } else {
+  shared_ptr(const weak_ptr<T>& wp) {
+    this->swap(wp.lock());
+    if(cb == nullptr)
+    {
       throw std::bad_weak_ptr();
     }
   }
@@ -234,11 +236,7 @@ public:
   }
 
   shared_ptr<T> lock() const noexcept {
-    try {
-      return shared_ptr<T>(*this);
-    } catch (std::bad_weak_ptr) {
-      return shared_ptr<T>();
-    }
+      return (cb && cb->get_count() ? shared_ptr<T>(cb->inc(), obj) : shared_ptr<T>(nullptr));
   }
 
   ~weak_ptr() noexcept {
